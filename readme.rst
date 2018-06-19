@@ -5,7 +5,7 @@ VapourSynth Script Importer for Avisynth2.6/Avisynth+
 
 version:
 ---------
-0.1.0
+0.1.1
 
 requirement:
 ------------

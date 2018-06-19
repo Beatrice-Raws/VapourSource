@@ -39,7 +39,7 @@
 
 #pragma warning(disable:4996)
 
-#define VS_VERSION "0.1.0"
+#define VS_VERSION "0.1.1"
 
 
 typedef IScriptEnvironment ise_t;
