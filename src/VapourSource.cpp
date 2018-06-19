@@ -35,6 +35,7 @@
 #include <windows.h>
 #include <avisynth.h>
 #include <VSScript.h>
+#include <atomic>
 
 #pragma warning(disable:4996)
 
@@ -42,6 +43,12 @@
 
 
 typedef IScriptEnvironment ise_t;
+
+typedef struct AsyncFrameContext {
+    const VSAPI *vsapi;
+    IScriptEnvironment *env;
+    std::atomic_int async_pending;
+} AsyncFrameContext;
 
 
 static void
@@ -194,12 +201,24 @@ write_bgr24_frame(const VSAPI* vsapi, const VSFrameRef* src,
 }
 
 
+static void VS_CC async_callback(void *user_data, const VSFrameRef *f, int n, VSNodeRef *node, const char *error_msg)
+{
+    AsyncFrameContext *async_handler = (AsyncFrameContext*)user_data;
+    if (!f) {
+        async_handler->env->ThrowError("VapourSource: async frame request failed: %s.", error_msg);
+    }
+    async_handler->vsapi->freeFrame(f);
+    std::atomic_fetch_sub(&async_handler->async_pending, 1);
+}
+
 class VapourSource : public IClip {
     const char* mode;
+    int prefetch;
     int isInit;
     VSScript* vsEnv;
     const VSAPI* vsapi;
     VSNodeRef* node;
+    AsyncFrameContext* async_handler;
     const VSVideoInfo* vsvi;
     VideoInfo vi;
 
@@ -210,7 +229,7 @@ class VapourSource : public IClip {
 
 public:
     VapourSource(const char* source, bool stacked, int index, bool utf8, 
-                 const char* mode, ise_t* env);
+                 const char* mode, int prefetch, ise_t* env);
     virtual ~VapourSource();
     PVideoFrame __stdcall GetFrame(int n, ise_t* env);
     bool __stdcall GetParity(int n) { return false; }
@@ -245,18 +264,19 @@ void VapourSource::validate(bool cond, std::string msg)
 
 VapourSource::
 VapourSource(const char* source, bool stacked, int index, bool utf8,
-             const char* m, ise_t* env) :
-    mode(m), isInit(0), vsEnv(nullptr), node(nullptr)
+             const char* m, int prefetch, ise_t* env) :
+    mode(m), prefetch(prefetch), isInit(0), vsEnv(nullptr), node(nullptr), async_handler(nullptr)
 {
     using std::string;
 
     memset(&vi, 0, sizeof(vi));
-
+    async_handler = (AsyncFrameContext*)calloc(1, sizeof(AsyncFrameContext));
     isInit = vsscript_init();
     validate(isInit == 0, "failed to initialize VapourSynth.");
 
     vsapi = vsscript_getVSApi();
     validate(!vsapi, "failed to get vsapi pointer.");
+    async_handler->vsapi = vsapi;
 
     std::vector<char> script;
     if (utf8) {
@@ -307,6 +327,8 @@ VapourSource(const char* source, bool stacked, int index, bool utf8,
 
     bool is_plus = env->FunctionExists("SetFilterMTMode") && !stacked;
 
+    async_handler->env = env;
+
     vi.pixel_type = get_avs_pixel_type(vsvi->format->id, is_plus);
     validate(vi.pixel_type == vi.CS_UNKNOWN, "input clip is unsupported format.");
 
@@ -334,7 +356,11 @@ VapourSource(const char* source, bool stacked, int index, bool utf8,
 
 VapourSource::~VapourSource()
 {
+    while (std::atomic_load(&async_handler->async_pending)) {
+        Sleep(1);
+    }
     destroy();
+    free(async_handler);
 }
 
 
@@ -343,6 +369,15 @@ PVideoFrame __stdcall VapourSource::GetFrame(int n, ise_t* env)
     const VSFrameRef* src = vsapi->getFrame(n, node, 0, 0);
     if (!src) {
         env->ThrowError("%s: failed to get frame from vapoursynth.", mode);
+    }
+
+    if (prefetch > 0) {
+        for (int i = 0; i < prefetch; i++) {
+            if (i >= vi.num_frames - n)
+                break;
+            vsapi->getFrameAsync(n + i, node, async_callback, async_handler);
+            std::atomic_fetch_add(&async_handler->async_pending, 1);
+        }
     }
 
     PVideoFrame dst = env->NewVideoFrame(vi);
@@ -363,10 +398,11 @@ create_vapoursource(AVSValue args, void* user_data, ise_t* env)
         env->ThrowError("%s: No source specified", mode);
     }
     bool utf8 = mode[2] == 'E' ? args[3].AsBool(false) : false;
+    int prefetch = mode[2] == 'E' ? args[4].AsInt(0) : args[3].AsInt(0);
     
     try {
         return new VapourSource(args[0].AsString(), args[1].AsBool(false),
-                                args[2].AsInt(0), utf8, mode, env);
+                                args[2].AsInt(0), utf8, mode, prefetch, env);
     } catch (std::runtime_error& e) {
         env->ThrowError("%s: %s", mode, e.what());
     }
@@ -382,16 +418,10 @@ AvisynthPluginInit3(ise_t* env, const AVS_Linkage* const vectors)
 {
     AVS_linkage = vectors;
 
-    env->AddFunction("VSImport", "[source]s[stacked]b[index]i",
+    env->AddFunction("VSImport", "[source]s[stacked]b[index]i[prefetch]i",
                      create_vapoursource, "VSImport");
-    env->AddFunction("VSEval", "[source]s[stacked]b[index]i[utf8]b",
+    env->AddFunction("VSEval",   "[source]s[stacked]b[index]i[utf8]b[prefetch]i",
                      create_vapoursource, "VSEval");
-
-    if (env->FunctionExists("SetFilterMTMode")) {
-        auto env2 = static_cast<IScriptEnvironment2*>(env);
-        env2->SetFilterMTMode("VSImport", MT_SERIALIZED, true);
-        env2->SetFilterMTMode("VSEval", MT_SERIALIZED, true);
-    }
 
     return "VapourSynth Script importer ver." VS_VERSION " by Oka Motofumi";
 }
