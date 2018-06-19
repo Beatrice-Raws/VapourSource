@@ -25,15 +25,16 @@ as follows.::
 
     VSImport(string source, bool "stacked", int "index")
 
-    source  - input script path.
-    stacked - if this is set to true, MSB/LSB will be separated and be stacked vertically (default: false).
-    index   - index of input clip(default:0).
+    source   - input script path.
+    stacked  - if this is set to true, MSB/LSB will be separated and be stacked vertically (default: false).
+    index    - index of input clip(default:0).
+    prefetch - request more frames in advance, in case you really need multithreading from vapoursynth.
 
 
     VSEval(string source, bool "stacked", int "index", bool "utf8")
     
     source - vapoursynth script.
-    stacked and index are same as VSImport.
+    stacked, index and prefetch are same as VSImport.
     utf8   - if this is set to true, source is assumed to be UTF-8 encoded (default: false).
 
 Measurement table of formats:
