@@ -5,7 +5,7 @@ VapourSynth Script Importer for Avisynth2.6/Avisynth+
 
 version:
 ---------
-0.1.1
+0.2
 
 requirement:
 ------------
@@ -15,7 +15,7 @@ AviSynth2.60 / Avisynth+MT r2005 or greater
 
 Windows Vista sp2 or later
 
-Microsoft Visual C++ 2015 Redistributable Package
+Microsoft Visual C++ 2019 Redistributable Package
 
 SSE2 capable CPU
 
@@ -28,7 +28,7 @@ as follows.::
     source   - input script path.
     stacked  - if this is set to true, MSB/LSB will be separated and be stacked vertically (default: false).
     index    - index of input clip(default:0).
-    prefetch - request more frames in advance, in case you really need multithreading from vapoursynth.
+    prefetch - request more frames in advance. By default will use amount of dedicated core threads from Vapoursynth.
 
 
     VSEval(string source, bool "stacked", int "index", bool "utf8")
@@ -84,4 +84,4 @@ Not constant format/resolution/framerate clips are unsupported.
 
 source code:
 ------------
-https://github.com/chikuzen/VapourSource/
+https://github.com/Beatrice-Raws/VapourSource/
